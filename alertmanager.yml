@@ -6,7 +6,7 @@
 # next push here will silently overwrite whatever you changed by hand.
 
 global:
-  resolve_timeout: 5m
+  resolve_timeout: 6m
 
 route:
   receiver: default-fallback
