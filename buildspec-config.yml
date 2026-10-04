@@ -39,13 +39,10 @@ phases:
           exit 1
         fi
       - echo "Pushing the rendered config to $SSM_PARAM_NAME..."
-      # --tier Intelligent-Tiering: confirmed live that a Standard-tier parameter hard-caps
-      # at 4096 chars ("Standard tier parameters support a maximum parameter value of 4096
-      # characters") -- this repo's real rendered config (full comments + inhibit_rules +
-      # real webhook URLs) already exceeds that. Intelligent-Tiering auto-upgrades to
-      # Advanced only once the content actually needs it, rather than paying for Advanced
-      # unconditionally or hard-coding a tier that breaks again as the config grows.
-      - aws ssm put-parameter --name "$SSM_PARAM_NAME" --type SecureString --tier Intelligent-Tiering --overwrite --region "$AWS_DEFAULT_REGION" --value file://alertmanager.rendered.yml
+      # Standard tier caps at 4096 characters -- keep alertmanager.yml comment-free so the
+      # rendered config stays well under that instead of needing an Advanced/
+      # Intelligent-Tiering parameter.
+      - aws ssm put-parameter --name "$SSM_PARAM_NAME" --type SecureString --overwrite --region "$AWS_DEFAULT_REGION" --value file://alertmanager.rendered.yml
       - rm -f alertmanager.rendered.yml
       - echo "Forcing a new ECS deployment so the fetch-config sidecar re-fetches it..."
       - aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_SERVICE_NAME" --force-new-deployment --region "$AWS_DEFAULT_REGION" > /dev/null
