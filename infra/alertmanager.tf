@@ -16,7 +16,7 @@ variable "alertmanager_memory" {
 }
 
 variable "alertmanager_allowed_cidr_blocks" {
-  description = "CIDRs allowed to reach Alertmanager on 9093. Defaults to the VPC's own CIDR."
+  description = "CIDRs allowed to reach Alertmanager on 9093. Defaultss to the VPC's own CIDR."
   type        = list(string)
   default     = []
 }
