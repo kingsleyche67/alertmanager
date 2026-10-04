@@ -1,18 +1,37 @@
 version: 0.2
 
-# Pushes alertmanager.yml verbatim to SSM, then force-redeploys the ECS service so the
-# fetch-config sidecar re-fetches it at the next task start -- confirmed directly, in the
-# personal-account sandbox test, that `/-/reload` alone does NOT pick up a changed SSM
-# value, since it only re-reads the task's already-fetched local file. force-new-deployment
-# is the real mechanism, not a workaround.
+# Renders alertmanager.yml (substituting real secrets fetched from SSM for the
+# *_PLACEHOLDER tokens it contains -- see alertmanager.yml's own header comment on why
+# real Slack webhook URLs are never committed) and pushes the RENDERED result to the
+# runtime config parameter, then force-redeploys ECS so the fetch-config sidecar picks it
+# up. Confirmed directly, in the personal-account sandbox test, that `/-/reload` alone does
+# NOT pick up a changed SSM value -- it only re-reads the task's already-fetched local
+# file. force-new-deployment is the real mechanism, not a workaround.
+#
+# Add a new secret-backed placeholder: put it in alertmanager.yml as
+# SOME_NAME_PLACEHOLDER, add a line below fetching /alertmanager/<env>/secrets/some_name
+# and substituting it, and seed that parameter once with
+# `aws ssm put-parameter --type SecureString --name /alertmanager/dev/secrets/some_name --value '...'`.
 phases:
   build:
     commands:
-      - echo "Validating alertmanager.yml is parseable YAML before pushing it..."
+      - echo "Validating alertmanager.yml is parseable YAML before rendering it..."
       - pip3 install --quiet pyyaml
       - python3 -c "import yaml,sys; yaml.safe_load(open('alertmanager.yml'))" || (echo "alertmanager.yml is not valid YAML -- aborting" && exit 1)
-      - echo "Pushing alertmanager.yml to $SSM_PARAM_NAME..."
-      - aws ssm put-parameter --name "$SSM_PARAM_NAME" --type SecureString --overwrite --region "$AWS_DEFAULT_REGION" --value file://alertmanager.yml
+      - echo "Fetching secrets and rendering the real config..."
+      - |
+        CUSTOMER1_SLACK_WEBHOOK=$(aws ssm get-parameter --name "$SSM_SECRETS_PREFIX/customer1_slack_webhook" --with-decryption --region "$AWS_DEFAULT_REGION" --query Parameter.Value --output text)
+        CUSTOMER2_SLACK_WEBHOOK=$(aws ssm get-parameter --name "$SSM_SECRETS_PREFIX/customer2_slack_webhook" --with-decryption --region "$AWS_DEFAULT_REGION" --query Parameter.Value --output text)
+        python3 -c "
+        import os
+        content = open('alertmanager.yml').read()
+        content = content.replace('CUSTOMER1_SLACK_WEBHOOK_PLACEHOLDER', os.environ['CUSTOMER1_SLACK_WEBHOOK'])
+        content = content.replace('CUSTOMER2_SLACK_WEBHOOK_PLACEHOLDER', os.environ['CUSTOMER2_SLACK_WEBHOOK'])
+        open('alertmanager.rendered.yml', 'w').write(content)
+        "
+      - echo "Pushing the rendered config to $SSM_PARAM_NAME..."
+      - aws ssm put-parameter --name "$SSM_PARAM_NAME" --type SecureString --overwrite --region "$AWS_DEFAULT_REGION" --value file://alertmanager.rendered.yml
+      - rm -f alertmanager.rendered.yml
       - echo "Forcing a new ECS deployment so the fetch-config sidecar re-fetches it..."
       - aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_SERVICE_NAME" --force-new-deployment --region "$AWS_DEFAULT_REGION" > /dev/null
       - echo "Done. New config is live once the replacement task passes its health check."

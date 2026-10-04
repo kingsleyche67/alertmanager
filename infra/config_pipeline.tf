@@ -42,10 +42,17 @@ resource "aws_iam_role_policy" "codebuild_config" {
         Resource = aws_ssm_parameter.alertmanager_config.arn
       },
       {
-        # SecureString write needs GenerateDataKey against the key, not Decrypt (that's
-        # only needed on the READ side -- see the task role's own policy in alertmanager.tf).
+        # Read access to the webhook secrets this buildspec substitutes into
+        # alertmanager.yml's placeholders -- never committed, seeded out-of-band.
         Effect   = "Allow"
-        Action   = ["kms:GenerateDataKey"]
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/secrets/*"
+      },
+      {
+        # Needs both directions: GenerateDataKey for the SecureString write (the rendered
+        # config), Decrypt for the SecureString reads (the webhook secrets) above.
+        Effect   = "Allow"
+        Action   = ["kms:GenerateDataKey", "kms:Decrypt"]
         Resource = "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alias/aws/ssm"
       },
       {
@@ -83,6 +90,10 @@ resource "aws_codebuild_project" "config" {
     environment_variable {
       name  = "ECS_SERVICE_NAME"
       value = aws_ecs_service.alertmanager.name
+    }
+    environment_variable {
+      name  = "SSM_SECRETS_PREFIX"
+      value = "${local.ssm_prefix}/secrets"
     }
   }
 

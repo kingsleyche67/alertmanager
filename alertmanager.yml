@@ -4,9 +4,28 @@
 # triggers nothing else (the image-build pipeline explicitly excludes it -- see
 # infra/pipeline.tf's trigger block). Edit this, not the SSM parameter directly, or the
 # next push here will silently overwrite whatever you changed by hand.
+#
+# `channel` deliberately omitted on both receivers below -- these are standard Slack
+# incoming webhooks, each bound to one fixed channel at creation; specifying a different
+# one either gets ignored or rejected depending on the app's scopes (same note as the real
+# Otel/otel-prometheus/alertmanager.yml).
+#
+# inhibit_rules below are copied verbatim from the real, deployed
+# Otel/otel-prometheus/alertmanager.yml -- same source/target/equal on every rule -- so this
+# config exercises the actual Liveline alert hierarchy, not a simplified stand-in.
+#
+# api_url values below are PLACEHOLDERS, deliberately -- GitHub's push protection rejected
+# an earlier commit here for exactly this reason: a real Slack incoming webhook URL is a
+# bearer secret, and this repo is public. The real URLs live only in SSM
+# (/alertmanager/dev/secrets/customer1_slack_webhook, .../customer2_slack_webhook, both
+# SecureString, set out-of-band via `aws ssm put-parameter` -- never committed) and
+# buildspec-config.yml substitutes them into this template before writing the rendered
+# result to the runtime config parameter. Same pattern as ll_admin_console's
+# terraform_pipeline module's `secure_tf_vars` -- a secret referenced by name in committed
+# config, fetched and substituted only at pipeline execution time.
 
 global:
-  resolve_timeout: 6m
+  resolve_timeout: 5m
 
 route:
   receiver: default-fallback
@@ -14,28 +33,70 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 3h
-  # One route per customer, matched on customer_id. Example (uncomment and edit):
-  # routes:
-  #   - matchers: ['customer_id="<real customer UUID>"']
-  #     receiver: customer-acme
+  routes:
+    - matchers: ['customer_id="customer1"']
+      receiver: customer1
+    - matchers: ['customer_id="customer2"']
+      receiver: customer2
 
 receivers:
   - name: default-fallback
-    # No integrations -- accepts and groups alerts but sends nowhere until a real
-    # receiver is added below. Verify what's flowing via the Alertmanager API
-    # (GET /api/v2/alerts) even with no receiver configured.
+    # No integrations -- accepts and groups alerts but sends nowhere. Anything not matched
+    # to a real customer_id below lands here instead of silently vanishing.
 
-  - name: edit-test-receiver
-    # Added to prove the pipeline: push a one-line config edit, confirm this name
-    # shows up at GET /api/v2/status on the live task, with no image rebuild involved.
+  - name: customer1
+    slack_configs:
+      - api_url: 'CUSTOMER1_SLACK_WEBHOOK_PLACEHOLDER'
+        send_resolved: true
+        title: '[TEST] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
 
-  # - name: customer-acme
-  #   slack_configs:
-  #     - api_url: 'https://hooks.slack.com/services/...'
-  #       channel: '#acme-alerts'
-  #       send_resolved: true
+  - name: customer2
+    slack_configs:
+      - api_url: 'CUSTOMER2_SLACK_WEBHOOK_PLACEHOLDER'
+        send_resolved: true
+        title: '[TEST] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
 
 inhibit_rules:
-  - source_matchers: ['alertname="FacilityTelemetryDark"', 'alertname="CollectorNotScraped"']
+  # A dead scrape target explains every other alert about it -- don't also page for
+  # OPCConnectorStateUnexpected/OPCBridgeStateUnexpected when the bridge isn't even being scraped.
+  - source_matchers: ['alertname="OPCBridgeDown"']
+    target_matchers: ['alertname=~"OPCConnectorStateUnexpected|OPCBridgeStateUnexpected"']
+    equal: ['instance']
+
+  # Tier 1 -> everything below, same facility.
+  - source_matchers: ['alertname=~"FacilityTelemetryDark|CollectorNotScraped"']
     target_matchers: ['tier=~"2|3|4"']
     equal: ['facility_id']
+
+  # Tier 2 (Agilicus tunnel) -> Tier 3 OPC alerts, same facility, every cell.
+  - source_matchers: ['alertname=~"AgilicusTunnelDown|AgilicusTunnelFlapping"']
+    target_matchers: ['alertname=~"OPCBridgeDown|OpcBridgeUnreachable|OPCConnectorStateUnexpected|OPCBridgeStateUnexpected|OPCConnectionInterrupted"']
+    equal: ['facility_id']
+
+  # Tier 2 (host resources) -> Tier 3/4, same facility.
+  - source_matchers: ['alertname=~"HostHighCpuLoad|HostOutOfMemory|HostDiskSpaceLow"']
+    target_matchers: ['tier=~"3|4"']
+    equal: ['facility_id']
+
+  # The exporter-down case, job-filtered rather than inventing separate
+  # NodeExporterDown/CadvisorDown alertnames.
+  - source_matchers: ['alertname="InstanceDown"', 'job=~"node-exporter|cadvisor"']
+    target_matchers: ['tier=~"3|4"']
+    equal: ['facility_id']
+
+  # Tier 2 (shared facility infrastructure) -> Tier 4, same facility, every cell.
+  - source_matchers: ['alertname="FacilityServiceUnreachable"']
+    target_matchers: ['alertname=~"NoCellEquipmentData|KafkaConsumerQueueGrowing|KafkaTopicRewinding"']
+    equal: ['facility_id']
+
+  # Tier 3 (OPC) -> Tier 4, same CELL only.
+  - source_matchers: ['alertname=~"OPCBridgeDown|OpcBridgeUnreachable|OPCConnectorStateUnexpected|OPCBridgeStateUnexpected|OPCConnectionInterrupted"']
+    target_matchers: ['alertname="NoCellEquipmentData"']
+    equal: ['cell_id']
+
+  # Tier 3 (ServiceDown) -> Tier 4, same cell AND same job.
+  - source_matchers: ['alertname="ServiceDown"']
+    target_matchers: ['alertname=~"NoCellEquipmentData|KafkaConsumerQueueGrowing|KafkaTopicRewinding"']
+    equal: ['cell_id', 'job']
