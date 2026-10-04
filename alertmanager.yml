@@ -25,6 +25,10 @@ receivers:
     # receiver is added below. Verify what's flowing via the Alertmanager API
     # (GET /api/v2/alerts) even with no receiver configured.
 
+  - name: edit-test-receiver
+    # Added to prove the pipeline: push a one-line config edit, confirm this name
+    # shows up at GET /api/v2/status on the live task, with no image rebuild involved.
+
   # - name: customer-acme
   #   slack_configs:
   #     - api_url: 'https://hooks.slack.com/services/...'
