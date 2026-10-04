@@ -4,3 +4,7 @@ environment                = "dev"
 project_name                = "alertmanager"
 github_full_repository_id  = "kingsleyche67/alertmanager"
 git_branch                 = "main"
+
+# Not created by Terraform -- see pipeline.tf's comment on codestar_connection_arn.
+# Console: Developer Tools -> Settings -> Connections -> Create connection -> GitHub.
+codestar_connection_arn    = "arn:aws:codeconnections:us-east-1:ACCOUNT_ID:connection/CONNECTION_ID"

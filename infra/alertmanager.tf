@@ -310,6 +310,6 @@ output "codepipeline_name" {
 }
 
 output "codestar_connection_arn" {
-  description = "Open this ARN's connection in the AWS Console and authorize it -- the one manual step. See pipeline.tf's comment."
-  value       = aws_codestarconnections_connection.github.arn
+  description = "Echoes back the connection ARN this was applied with -- confirm it matches what's Available in the console if a pipeline's Source stage starts failing."
+  value       = var.codestar_connection_arn
 }

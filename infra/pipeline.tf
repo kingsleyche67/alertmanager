@@ -77,24 +77,24 @@ resource "aws_s3_bucket_public_access_block" "codepipeline_artifacts" {
 }
 
 # =================
-# CodeStar GitHub connection
+# CodeStar/CodeConnections GitHub connection
 #
-# IMPORTANT -- the one step Terraform cannot finish on its own: this resource is created in
-# PENDING status. A human must open it in the AWS Console (Developer Tools -> Settings ->
-# Connections) and click "Update pending connection" to authorize the GitHub App against the
-# kingsleyche67/alertmanager repo. The pipeline's Source stage cannot pull code until that
-# one-time, browser-based authorization is done -- there is no CLI/API way to complete it.
-# =================
-
-resource "aws_codestarconnections_connection" "github" {
-  name          = "${var.project_name}-github-${var.environment}"
-  provider_type = "GitHub"
-
-  tags = {
-    Name        = "${var.project_name}-github-${var.environment}"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+# NOT managed as a Terraform resource -- deliberately. Creating/authorizing a GitHub
+# connection is an inherently manual, browser-driven step (install+authorize the "AWS
+# Connector for GitHub" app, pick repo access) with no CLI/API path to finish it, and a
+# Terraform-managed resource here is ForceNew on most meaningful attribute changes -- any
+# drift (or deleting the GitHub App installation, which breaks the connection outright,
+# confirmed live 2026-10-04) would make Terraform want to destroy and recreate it, which
+# means redoing that manual authorization from scratch every time. Simpler to let the
+# connection's lifecycle live entirely outside Terraform and just hand in whatever ARN is
+# currently Available.
+#
+# Create/re-create it: AWS Console -> Developer Tools -> Settings -> Connections -> Create
+# connection -> GitHub -> authorize -> choose repository access -> copy the resulting ARN
+# into codestar_connection_arn below (or -var/terraform.tfvars).
+variable "codestar_connection_arn" {
+  description = "ARN of an already-Available CodeStar/CodeConnections GitHub connection. See comment above -- not created by this Terraform."
+  type        = string
 }
 
 # =================
@@ -246,7 +246,7 @@ resource "aws_iam_role_policy" "codepipeline" {
       {
         Effect   = "Allow"
         Action   = ["codestar-connections:UseConnection"]
-        Resource = aws_codestarconnections_connection.github.arn
+        Resource = var.codestar_connection_arn
       },
       {
         Effect   = "Allow"
@@ -291,7 +291,7 @@ resource "aws_codepipeline" "alertmanager" {
       output_artifacts = ["source_output"]
 
       configuration = {
-        ConnectionArn    = aws_codestarconnections_connection.github.arn
+        ConnectionArn    = var.codestar_connection_arn
         FullRepositoryId = var.github_full_repository_id
         BranchName       = var.git_branch
       }
