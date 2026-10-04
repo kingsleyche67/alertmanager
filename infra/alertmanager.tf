@@ -35,9 +35,15 @@ locals {
 
 resource "aws_ssm_parameter" "alertmanager_config" {
   name        = "${local.ssm_prefix}/config"
-  description = "Full alertmanager.yml content. Owned by the reconciler after first apply."
+  description = "Full alertmanager.yml content. Owned by the config pipeline after first apply."
   type        = "SecureString"
-  value       = <<-EOT
+  # Intelligent-Tiering: a Standard-tier parameter hard-caps at 4096 characters, confirmed
+  # live -- the real rendered config already exceeds that. Auto-upgrades to Advanced only
+  # once content actually needs it. Must match buildspec-config.yml's own --tier flag, or
+  # Terraform and the pipeline will fight over this attribute the same way `value` would
+  # without the ignore_changes below.
+  tier  = "Intelligent-Tiering"
+  value = <<-EOT
     route:
       receiver: default-fallback
       group_by: ['alertname', 'facility_id', 'cell_id']
