@@ -1,0 +1,6 @@
+# cp terraform.tfvars.example terraform.tfvars and fill in
+aws_region                 = "us-east-1"
+environment                = "dev"
+project_name                = "alertmanager"
+github_full_repository_id  = "kingsleyche67/alertmanager"
+git_branch                 = "main"

@@ -1,0 +1,34 @@
+version: 0.2
+
+# Mirrors the real ll_admin_console/backend/buildspec.yml shape (ECR login -> build -> tag
+# -> push -> imagedefinitions.json), trimmed down: no CodeArtifact/pip step since this image
+# has no application source to compile, just the public alertmanager binary re-hosted into
+# our own ECR -- same reason the existing ll_alert_manager repo's Dockerfile is a one-liner.
+phases:
+  pre_build:
+    commands:
+      - echo "AWS Account ID is $AWS_ACCOUNT_ID"
+      - echo "AWS Region is $AWS_DEFAULT_REGION"
+      - REPO_LINK=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com
+      - REPOSITORY_URI=${REPO_LINK}/${ECR_REPOSITORY_NAME}
+      - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_NUMBER)
+      - echo "ECR repository URI is $REPOSITORY_URI"
+      - echo "Image tag is $IMAGE_TAG"
+      - echo "Logging in to Amazon ECR..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $REPO_LINK
+  build:
+    commands:
+      - echo Build started on `date`
+      - docker build -f Dockerfile -t $REPOSITORY_URI:latest .
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo "Writing image definitions file..."
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$CONTAINER_NAME" "$REPOSITORY_URI:$IMAGE_TAG" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files: imagedefinitions.json
