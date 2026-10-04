@@ -1,0 +1,37 @@
+# Edit this file and push to main -- the config pipeline (see infra/config_pipeline.tf)
+# pushes it verbatim to SSM and force-redeploys the ECS service to pick it up. This is the
+# ONLY file that pipeline watches; nothing else in this repo triggers it, and this file
+# triggers nothing else (the image-build pipeline explicitly excludes it -- see
+# infra/pipeline.tf's trigger block). Edit this, not the SSM parameter directly, or the
+# next push here will silently overwrite whatever you changed by hand.
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-fallback
+  group_by: ['alertname', 'facility_id', 'cell_id']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+  # One route per customer, matched on customer_id. Example (uncomment and edit):
+  # routes:
+  #   - matchers: ['customer_id="<real customer UUID>"']
+  #     receiver: customer-acme
+
+receivers:
+  - name: default-fallback
+    # No integrations -- accepts and groups alerts but sends nowhere until a real
+    # receiver is added below. Verify what's flowing via the Alertmanager API
+    # (GET /api/v2/alerts) even with no receiver configured.
+
+  # - name: customer-acme
+  #   slack_configs:
+  #     - api_url: 'https://hooks.slack.com/services/...'
+  #       channel: '#acme-alerts'
+  #       send_resolved: true
+
+inhibit_rules:
+  - source_matchers: ['alertname="FacilityTelemetryDark"', 'alertname="CollectorNotScraped"']
+    target_matchers: ['tier=~"2|3|4"']
+    equal: ['facility_id']

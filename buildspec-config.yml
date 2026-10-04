@@ -1,0 +1,18 @@
+version: 0.2
+
+# Pushes alertmanager.yml verbatim to SSM, then force-redeploys the ECS service so the
+# fetch-config sidecar re-fetches it at the next task start -- confirmed directly, in the
+# personal-account sandbox test, that `/-/reload` alone does NOT pick up a changed SSM
+# value, since it only re-reads the task's already-fetched local file. force-new-deployment
+# is the real mechanism, not a workaround.
+phases:
+  build:
+    commands:
+      - echo "Validating alertmanager.yml is parseable YAML before pushing it..."
+      - pip3 install --quiet pyyaml
+      - python3 -c "import yaml,sys; yaml.safe_load(open('alertmanager.yml'))" || (echo "alertmanager.yml is not valid YAML -- aborting" && exit 1)
+      - echo "Pushing alertmanager.yml to $SSM_PARAM_NAME..."
+      - aws ssm put-parameter --name "$SSM_PARAM_NAME" --type SecureString --overwrite --region "$AWS_DEFAULT_REGION" --value file://alertmanager.yml
+      - echo "Forcing a new ECS deployment so the fetch-config sidecar re-fetches it..."
+      - aws ecs update-service --cluster "$ECS_CLUSTER_NAME" --service "$ECS_SERVICE_NAME" --force-new-deployment --region "$AWS_DEFAULT_REGION" > /dev/null
+      - echo "Done. New config is live once the replacement task passes its health check."

@@ -269,6 +269,11 @@ resource "aws_codepipeline" "alertmanager" {
   name     = "${var.project_name}-${var.environment}"
   role_arn = aws_iam_role.codepipeline.arn
 
+  # V2 + trigger below: excludes alertmanager.yml so a config-only commit doesn't also
+  # rebuild and redeploy the image -- that's the config pipeline's job (config_pipeline.tf).
+  pipeline_type  = "V2"
+  execution_mode = "QUEUED"
+
   artifact_store {
     location = aws_s3_bucket.codepipeline_artifacts.bucket
     type     = "S3"
@@ -326,6 +331,23 @@ resource "aws_codepipeline" "alertmanager" {
         ClusterName = aws_ecs_cluster.this.name
         ServiceName = aws_ecs_service.alertmanager.name
         FileName    = "imagedefinitions.json"
+      }
+    }
+  }
+
+  trigger {
+    provider_type = "CodeStarSourceConnection"
+
+    git_configuration {
+      source_action_name = "Source"
+
+      push {
+        branches {
+          includes = [var.git_branch]
+        }
+        file_paths {
+          excludes = ["alertmanager.yml"]
+        }
       }
     }
   }
