@@ -48,15 +48,19 @@ receivers:
     slack_configs:
       - api_url: 'CUSTOMER1_SLACK_WEBHOOK_PLACEHOLDER'
         send_resolved: true
-        title: '[TEST] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
-        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
+        # No custom title/text -- SSM Parameter Store hard-rejects any value containing a
+        # literal Go-template delimiter pair (it reserves that syntax for its own
+        # parameter-reference feature, confirmed live: PutParameter fails with "Parameter
+        # value can't nest another parameter" for ANY such string, SecureString or not --
+        # this comment avoids typing the literal delimiters itself for the same reason).
+        # Alertmanager's own built-in default Slack format is used instead -- good enough,
+        # and it sidesteps the restriction entirely rather than needing an escape/decode
+        # round-trip in the fetch-config sidecar.
 
   - name: customer2
     slack_configs:
       - api_url: 'CUSTOMER2_SLACK_WEBHOOK_PLACEHOLDER'
         send_resolved: true
-        title: '[TEST] {{ .CommonLabels.alertname }} ({{ .CommonLabels.severity }})'
-        text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ "\n" }}{{ end }}'
 
 inhibit_rules:
   # A dead scrape target explains every other alert about it -- don't also page for

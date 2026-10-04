@@ -29,6 +29,15 @@ phases:
         content = content.replace('CUSTOMER2_SLACK_WEBHOOK_PLACEHOLDER', os.environ['CUSTOMER2_SLACK_WEBHOOK'])
         open('alertmanager.rendered.yml', 'w').write(content)
         "
+      - |
+        if grep -qF '{{' alertmanager.rendered.yml; then
+          echo "ABORTING: alertmanager.yml contains a literal Go-template delimiter pair."
+          echo "SSM Parameter Store rejects any value containing one (it reserves that"
+          echo "syntax for its own parameter references) -- confirmed live 2026-10-04."
+          echo "Remove any custom Slack title/text templates and rely on Alertmanager's"
+          echo "built-in default format instead."
+          exit 1
+        fi
       - echo "Pushing the rendered config to $SSM_PARAM_NAME..."
       - aws ssm put-parameter --name "$SSM_PARAM_NAME" --type SecureString --overwrite --region "$AWS_DEFAULT_REGION" --value file://alertmanager.rendered.yml
       - rm -f alertmanager.rendered.yml
